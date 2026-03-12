@@ -144,6 +144,79 @@ function Expand-DriverArchives {
     }
 }
 
+function Get-InstallRoots {
+    param(
+        [string]$DriverDir,
+        [string]$CleanDir,
+        [string]$ExtractDir
+    )
+
+    $roots = New-Object System.Collections.Generic.List[string]
+
+    if (Test-Path -LiteralPath $CleanDir) {
+        [void]$roots.Add($CleanDir)
+    }
+
+    if (Test-Path -LiteralPath $DriverDir) {
+        Get-ChildItem -Path $DriverDir -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                $name = $_.Name.ToLowerInvariant()
+                if ($name -in @('_exported_from_system', 'anv16_clean')) { return }
+                [void]$roots.Add($_.FullName)
+            }
+    }
+
+    if (Test-Path -LiteralPath $ExtractDir) {
+        [void]$roots.Add($ExtractDir)
+    }
+
+    return $roots | Select-Object -Unique
+}
+
+function Test-IsSetupCandidate {
+    param([string]$Path)
+
+    $p = $Path.ToLowerInvariant()
+
+    # Jangan jalankan binary dari backup/export INF folder.
+    if ($p -match '\\_exported_from_system\\') { return $false }
+    if ($p -match '\\anv16_clean\\') { return $false }
+    if ($p -match '\\.inf_amd64_') { return $false }
+
+    # Hindari executable service/helper yang bukan installer.
+    if ($p -match 'service\.exe$|helper\.exe$|host\.exe$') { return $false }
+
+    return $true
+}
+
+function Get-SetupRoots {
+    param(
+        [string]$DriverDir,
+        [string]$ExtractDir
+    )
+
+    $roots = New-Object System.Collections.Generic.List[string]
+
+    # Setup EXE/MSI hanya dari paket driver user (bukan hasil export store).
+    if (Test-Path -LiteralPath $DriverDir) {
+        Get-ChildItem -Path $DriverDir -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                $name = $_.Name.ToLowerInvariant()
+                if ($name -in @('_exported_from_system', 'anv16_clean')) { return }
+                [void]$roots.Add($_.FullName)
+            }
+
+        # Juga cek file installer yang ditaruh langsung di root Drivers.
+        [void]$roots.Add($DriverDir)
+    }
+
+    if (Test-Path -LiteralPath $ExtractDir) {
+        [void]$roots.Add($ExtractDir)
+    }
+
+    return $roots | Select-Object -Unique
+}
+
 function Get-TargetHardwareIds {
     # Prioritaskan perangkat yang error/missing driver, fallback ke perangkat present.
     $ids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
@@ -439,20 +512,18 @@ try {
     Write-Log 'Step 2/6: Install INF driver (prioritas hardware ID).' 
     $targetHardwareIds = Get-TargetHardwareIds
     Write-Log "Hardware IDs terdeteksi: $($targetHardwareIds.Count)"
-    $infRoots = @()
-    if (Test-Path -LiteralPath $cleanDir) { $infRoots += $cleanDir }
-    $infRoots += @($driverDir, $extractDir)
+    $infRoots = Get-InstallRoots -DriverDir $driverDir -CleanDir $cleanDir -ExtractDir $extractDir
+    foreach ($r in $infRoots) { Write-Log "INF root: $r" }
     Install-InfDrivers -Roots $infRoots -HardwareIds $targetHardwareIds
 
     Write-Log 'Step 3/6: Install EXE/MSI berdasarkan prioritas.'
     $installers = @()
-    $setupRoots = @()
-    if (Test-Path -LiteralPath $cleanDir) { $setupRoots += $cleanDir }
-    $setupRoots += @($driverDir, $extractDir)
+    $setupRoots = Get-SetupRoots -DriverDir $driverDir -ExtractDir $extractDir
+    foreach ($r in $setupRoots) { Write-Log "Setup root: $r" }
     foreach ($root in $setupRoots) {
         if (-not (Test-Path -LiteralPath $root)) { continue }
         $installers += Get-ChildItem -Path $root -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.Extension -match '^\.(exe|msi)$' }
+            Where-Object { $_.Extension -match '^\.(exe|msi)$' -and (Test-IsSetupCandidate -Path $_.FullName) }
     }
 
     $installers = $installers |
@@ -479,7 +550,7 @@ try {
     Write-Log 'Step 4/6: Simpan state instalasi.'
     $state | ConvertTo-Json -Depth 4 | Set-Content -Path $stateFile -Encoding UTF8
 
-    Write-Log 'Step 5/6: Export driver store ke folder Drivers.'
+    Write-Log 'Step 5/6: Export driver store ke folder Drivers.'.
     Export-DriverStoreToFolder -DriverRoot $driverDir
 
     Write-Log "Ringkasan: sukses=$ok, skip=$skip, gagal=$fail"
