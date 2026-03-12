@@ -550,7 +550,7 @@ try {
     Write-Log 'Step 4/6: Simpan state instalasi.'
     $state | ConvertTo-Json -Depth 4 | Set-Content -Path $stateFile -Encoding UTF8
 
-    Write-Log 'Step 5/6: Export driver store ke folder Drivers.'.
+    Write-Log 'Step 5/6: Export driver store ke folder Drivers.'
     Export-DriverStoreToFolder -DriverRoot $driverDir
 
     Write-Log "Ringkasan: sukses=$ok, skip=$skip, gagal=$fail"
