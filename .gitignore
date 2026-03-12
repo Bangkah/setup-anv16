@@ -1,0 +1,16 @@
+# Runtime artifacts
+install-log-*.txt
+install-state.json
+_extracted/
+acer_page.html
+page.html
+
+# Local driver payloads (do not push binaries)
+Drivers/*
+!Drivers/.gitkeep
+!Drivers/README.md
+
+# OS/editor noise
+Thumbs.db
+.DS_Store
+.vscode/
